@@ -1,0 +1,238 @@
+---
+title: "NYPD Shooting Project"
+author: "Ethan Tucker"
+date: "2/28/2022"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(scales)
+```
+
+Before proceeding to knit, please ensure that you have the following packages installed:
+
+1. tidyverse
+2. scales
+3. lubridate
+
+Thanks so much and enjoy!
+
+## Question of Interest and Data Source
+
+The data in this project is found [here](https://catalog.data.gov/dataset/nypd-shooting-incident-data-historic/resource/c564b578-fd8a-4005-8365-34150d306cc4). The data is summarized in the next section (and in the conclusion) that details my tidying efforts. The data contains - among many other things - information regarding the victims of shooting incidents in New York City. I wanted to know how the victim statistics - age, race, sex - changed over time. Thanks so much for taking the time to read my project!
+
+
+```{r Import and Tidy Data}
+getwd()
+untidyData <- read_csv("./Data/NYPD_Shooting_Incident_Data__Historic_.csv")
+
+## Remove unnecessary and potentially biased variables
+shootingData <- data.frame(untidyData) %>%
+                  select(-c(LOCATION_DESC, Lon_Lat, PERP_AGE_GROUP, PERP_SEX, PERP_RACE))
+
+## Change categorical variables to factors
+shootingData$INCIDENT_KEY <- parse_factor(as.character(untidyData$INCIDENT_KEY))
+shootingData$BORO <- parse_factor(as.character(untidyData$INCIDENT_KEY))
+shootingData$PRECINCT <- parse_factor(as.character(untidyData$PRECINCT))
+shootingData$JURISDICTION_CODE <- parse_factor(as.character(untidyData$JURISDICTION_CODE))
+shootingData$VIC_AGE_GROUP <- parse_factor(untidyData$VIC_AGE_GROUP)
+shootingData$VIC_SEX <- as.factor(untidyData$VIC_SEX)
+shootingData$VIC_RACE <- as.factor(untidyData$VIC_RACE)
+
+
+## Change dates and times from character to date
+shootingData$OCCUR_DATE <- parse_date(untidyData$OCCUR_DATE, format = "%m/%d/%Y")
+shootingData$OCCUR_TIME <- parse_time(as.character(untidyData$OCCUR_TIME))
+
+## Overview of the data
+shootingData %>% glimpse()
+```
+
+## Summary of Dataset and Tidying:
+
+The NYPD Shooting Incident (Historic) dataset contains `nrow(untidyData)` records on `ncol(untidyData)` variables. In my cleaning I removed the Lon_Lat variable which contained duplicate information (both longitude and latitude are variables by themselves), and the LOCATION_DESC variable which contained the officer's description of the location of the shooting. This is interesting information, but the descriptions are not consistent in nomenclature and are mostly missing. I have also chosen to remove the perpetrator variables (sex, race, age group), because these variables may contain bias from both the police filing the reports and witnesses who conveyed information to the police. My expectation is that minorities and men are overrepresented against reality in this dataset in the perpetrator variables. These variables are also awash with missing values, so removing them kill two birds with one stone. The resulting dataset which I have called shootingData contains the same number of observations on `ncol(shootingData)` variables. I have included a glimpse() of shootingData in the output of the cell above. The below chunk confirms that there are no remaining missing values in the dataset.
+
+```{r Check for missing values}
+countMissing <- function(column){
+  
+        n.missing <- length(which(is.na(column)))
+        return(n.missing)
+}
+
+toPrint <- rep("", ncol(shootingData))
+
+for(i in 1:ncol(shootingData)){
+  toPrint[i] <- paste("The number of missing values in the variable", names(shootingData)[i], "was:", countMissing(shootingData[, i]), ".")
+}
+
+toPrint
+```
+
+## Visualizations
+
+I chose to make bar-charts of victim data, because victim data seems quite bias-free. I have plotted date on the x axis (binned by year) and shooting count on the y axis. The data are grouped into different colors by age group, sex, and race depending on the graph. An interesting comparison would be to plot this data against the national statistics to see how New York shooting violence has historically compared to the national averages.
+
+```{r Make Visualizations, warning=FALSE}
+## Number of Shootings Vs. Year by Victim Age Group
+shootingData %>%
+  ggplot(aes(x = OCCUR_DATE, fill = VIC_AGE_GROUP)) +
+  geom_histogram(position = "dodge") +
+  scale_x_date(labels = date_format("%y"), breaks= date_breaks(width = "1 year")) +
+  labs(x = "Year",
+       y = "Number of Shootings",
+       fill = "Victim Age Group",
+       title = "Number of Shootings Vs. Year by Victim Age Group")
+
+## Number of Shootings Vs. Year by Victim Race
+shootingData %>%
+  ggplot(aes(x = OCCUR_DATE, fill = VIC_RACE)) +
+  geom_histogram(position = "dodge") +
+  scale_x_date(labels = date_format("%y"), breaks= date_breaks(width = "1 year")) +
+  labs(x = "Year",
+       y = "Number of Shootings",
+       fill = "Victim Race",
+       title = "Number of Shootings Vs. Year by Victim Race")
+
+## Number of Shootings Vs. Year by Victim Race
+shootingData %>%
+  ggplot(aes(x = OCCUR_DATE, fill = VIC_SEX)) +
+  geom_histogram(position = "dodge") +
+  scale_x_date(labels = date_format("%y"), breaks= date_breaks(width = "1 year")) +
+  labs(x = "Year",
+       y = "Number of Shootings",
+       fill = "Victim Sex",
+       title = "Number of Shootings Vs. Year by Victim Sex")
+```
+
+
+# Analysis
+
+I did some data manipulation to effectively re-create the above visualizations as tables. The one change I made was that instead of reporting the total shooting count for each analysis, I decided to report the proportion of shootings that year per category. This would also make an interesting plot!
+
+```{r Make tables}
+age_table <- shootingData %>%
+                group_by(year = lubridate::floor_date(OCCUR_DATE, "year")) %>%
+                  mutate(count = n()) %>%
+                    group_by(year, VIC_AGE_GROUP) %>%
+                      summarise(year = year, proportion = n()/count) %>%
+                        arrange(-desc(year)) %>%
+                          distinct() %>%
+                            ungroup()
+
+race_table <- shootingData %>%
+                group_by(year = lubridate::floor_date(OCCUR_DATE, "year")) %>%
+                  mutate(count = n()) %>%
+                    group_by(year, VIC_RACE) %>%
+                      summarise(year = year, proportion = n()/count) %>%
+                        arrange(-desc(year)) %>%
+                          distinct() %>%
+                            ungroup()
+
+sex_table <- shootingData %>%
+                group_by(year = lubridate::floor_date(OCCUR_DATE, "year")) %>%
+                  mutate(count = n()) %>%
+                    group_by(year, VIC_SEX) %>%
+                      summarise(year = year, proportion = n()/count) %>%
+                        arrange(-desc(year)) %>%
+                          distinct() %>%
+                            ungroup()
+
+age_table ; race_table ; sex_table
+```
+
+```{r updated table plots, warning=FALSE}
+## Victim Proportion Vs. Date by Victim Age Group
+age_table %>% 
+  ggplot(aes(x = year, y = proportion, color = VIC_AGE_GROUP)) +
+  geom_smooth(se = FALSE) + #This is a census so no CI
+  scale_x_date(labels = date_format("%y"), 
+               breaks= date_breaks(width = "1 year")) +
+  labs(x = "Date",
+       y = "Victim Proportion",
+       title = "Victim Proportion Vs. Date by Victim
+                Age Group")
+
+## Victim Proportion Vs. Date by Victim Race
+race_table %>% 
+  ggplot(aes(x = year, y = proportion, color = VIC_RACE)) +
+  geom_smooth(se = FALSE) + #This is a census so no CI
+  scale_x_date(labels = date_format("%y"), 
+               breaks= date_breaks(width = "1 year")) +
+  labs(x = "Date",
+       y = "Victim Proportion",
+       title = "Victim Proportion Vs. Date by Victim
+                Race")
+
+## Victim Proportion Vs. Date by Victim Sex
+sex_table %>% 
+  ggplot(aes(x = year, y = proportion, color = VIC_SEX)) +
+  geom_smooth(se = FALSE) + #This is a census so no CI
+  scale_x_date(labels = date_format("%y"), 
+               breaks= date_breaks(width = "1 year")) +
+  labs(x = "Date",
+       y = "Victim Proportion",
+       title = "Victim Proportion Vs. Date by Victim
+                Sex")
+```
+
+
+# Model
+While a linear model is certainly not appropriate for this shooting data considering the massive spike during COVID, it can give us some insight into what might have been the shooting statistics had COVID not happened. I will do a model that predicts the number of shootings by year for each age group in age_table.
+
+```{r Individual Age Models}
+## Model for ages less than 18
+ages.lessthan18 <- age_table %>% 
+                    filter(VIC_AGE_GROUP == unique(age_table$VIC_AGE_GROUP)[4])
+lmod.lessthan18 <- lm(proportion ~ year, data = ages.lessthan18)
+summary(lmod.lessthan18)
+
+## Model for ages 18 - 24
+ages.18to24 <- age_table %>%
+                filter(VIC_AGE_GROUP == unique(age_table$VIC_AGE_GROUP)[3])
+lmod.18to24 <- lm(proportion ~ year, data = ages.18to24)
+summary(lmod.18to24)
+
+## Model for ages 25 - 44
+ages.25to44 <- age_table %>%
+                filter(VIC_AGE_GROUP == unique(age_table$VIC_AGE_GROUP)[1])
+lmod.25to44 <- lm(proportion ~ year, data = ages.25to44)
+summary(lmod.25to44)
+
+## Model for ages 45 - 64
+ages.45to64 <- age_table %>%
+                filter(VIC_AGE_GROUP == unique(age_table$VIC_AGE_GROUP)[5])
+lmod.45to64 <- lm(proportion ~ year, data = ages.45to64)
+summary(lmod.45to64)
+
+## Model for ages 65 + 
+ages.greaterthan65 <- age_table %>%
+                filter(VIC_AGE_GROUP == unique(age_table$VIC_AGE_GROUP)[2])
+lmod.greaterthan65 <- lm(proportion ~ year, data = ages.greaterthan65)
+summary(lmod.greaterthan65)
+```
+
+```{r}
+
+```
+
+
+## Comments on models
+
+The models show that on average the ages of shooting victims have been increasing. That's probably a good thing because fewer kids are getting shot. The model for shooting victims over the age of 65 is not statistically significant. 
+
+## Conclusion and Bias Identification:
+
+In this project I imported a dataset containing NYPD records of shooting incidents between `min(shootingData$OCCUR_DATE)` and `max(shootingData$OCCUR_DATE)`. I cleaned the data by adjusting the variable classes, and by removing some oronious and potentially biased variables. I created three visualizations and three analysis tables summarizing shooting incidents vs. year according to a couple different victim groupings. I ran some models predicting the proportion of shootings by age group by year, and found that on average the age of shooting victims was increasing between $2006$ and $2020$. An important caviat is that the linear models do not accurately predict the shooting statistics from $2020$ during the COVID pandemic. 
+
+The data are inputted by the New York Police Department, which notoriously had ``stop and frisk" as their modus operandi for several years while Rudy Guiliani was mayor. That time period falls within this dataset. As such it is likely that minorities are inaccurately reported, especially in the perpetrator variables. To help circumvent this problem, the analyses, visualizations, and models I made only used the victim columns which (to me) seem less likely to have racial / sexist biases. The reason for this belief is because victims tend to go to hospitals at which the police take their statements, instead of having their race / sex misconstrued by witnesses and police. That said, another potential source of bias relates to police potentially not responding to shooting calls in minority neighborhoods, thus deflating those shooting statistics. This seems to be minor if extant, because shootings are always a high priority for police and is responsible for large swathes of NYPD funding (gear, etc.).
+My personal bias lies in that I am overly suspiscious of any data that includes race but not social class. I particularly don't believe police reports, and think that some of these shootings were perpetrated by police rather than "Unknown" perpetrators. Perhaps that's wrong. Regardless, that doesn't impact the validity of the victim data.
+
+```{r}
+sessionInfo()
+```
+
